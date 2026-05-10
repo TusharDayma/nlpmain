@@ -16,11 +16,7 @@ __pycache__/
 .idea/
 .vscode/
 
-# Datasets & Large Files
-*.csv
-*.json
-*.zip
-*.pdf
+
 
 # Generated Output / Plots
 *.png
