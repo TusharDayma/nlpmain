@@ -6,3 +6,6 @@ xgboost
 tensorflow
 matplotlib
 seaborn
+spacy
+sentence-transformers
+torch

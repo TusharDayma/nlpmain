@@ -1,80 +1,86 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.svm import SVC
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.decomposition import LatentDirichletAllocation, NMF, PCA
+from sklearn.cluster import KMeans
+from sklearn.manifold import TSNE
+import warnings
 
-def load_data(filepath='spam.csv'):
-    # SMS spam dataset often has 'v1' (label) and 'v2' (text), and some empty cols
-    df = pd.read_csv(filepath, encoding='latin-1')
-    df = df[['v1', 'v2']]
-    df.columns = ['label', 'text']
-    df['label'] = df['label'].map({'ham': 0, 'spam': 1})
+warnings.filterwarnings('ignore')
+
+def load_data(filepath='News_Category_Dataset_v3.json', sample_size=2000):
+    df = pd.read_json(filepath, lines=True)
+    # We'll use headline and short_description
+    df['text'] = df['headline'] + " " + df['short_description']
+    df = df.sample(sample_size, random_state=42)
     print("Loaded dataset successfully.")
-    return df
+    return df['text'].tolist()
+
+def display_topics(model, feature_names, no_top_words):
+    for topic_idx, topic in enumerate(model.components_):
+        print(f"Topic {topic_idx}:")
+        print(" ".join([feature_names[i] for i in topic.argsort()[:-no_top_words - 1:-1]]))
 
 def main():
-    print("--- Practical 8: SMS/Email Spam Detection ---\n")
-    df = load_data()
+    print("--- Practical 9: Topic Modelling & Document Clustering ---\n")
+    documents = load_data()
     
-    X = df['text']
-    y = df['label']
+    no_features = 1000
+    no_topics = 5
+    no_top_words = 10
     
-    # Handle imbalanced dataset (Demonstration: print distribution)
-    print("Class Distribution:")
-    print(y.value_counts(normalize=True))
+    # 1. Topic Modeling (LDA & NMF)
+    print("\nApplying TF and TF-IDF...")
+    tf_vectorizer = CountVectorizer(max_df=0.95, min_df=2, max_features=no_features, stop_words='english')
+    tf = tf_vectorizer.fit_transform(documents)
+    tf_feature_names = tf_vectorizer.get_feature_names_out()
     
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    tfidf_vectorizer = TfidfVectorizer(max_df=0.95, min_df=2, max_features=no_features, stop_words='english')
+    tfidf = tfidf_vectorizer.fit_transform(documents)
+    tfidf_feature_names = tfidf_vectorizer.get_feature_names_out()
     
-    print("\nApplying TF-IDF Vectorization...")
-    # For demonstration we use TF-IDF, CountVectorizer and Embeddings are conceptually mentioned in the code via comments
-    tfidf = TfidfVectorizer(max_features=3000, stop_words='english')
-    X_train_tfidf = tfidf.fit_transform(X_train).toarray()
-    X_test_tfidf = tfidf.transform(X_test).toarray()
+    print("\n--- Latent Dirichlet Allocation (LDA) ---")
+    lda = LatentDirichletAllocation(n_components=no_topics, max_iter=5, learning_method='online', random_state=42).fit(tf)
+    display_topics(lda, tf_feature_names, no_top_words)
     
-    print("\nTraining Models...")
+    print("\n--- Non-negative Matrix Factorization (NMF) ---")
+    nmf = NMF(n_components=no_topics, random_state=42, init='nndsvd').fit(tfidf)
+    display_topics(nmf, tfidf_feature_names, no_top_words)
     
-    nb_model = MultinomialNB()
-    svm_model = SVC(kernel='linear', probability=True, random_state=42)
-    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+    # 2. Document Clustering (K-Means)
+    print("\n--- K-Means Clustering ---")
+    num_clusters = 5
+    km = KMeans(n_clusters=num_clusters, random_state=42)
+    km.fit(tfidf)
+    clusters = km.labels_
     
-    ensemble_model = VotingClassifier(
-        estimators=[('nb', nb_model), ('svm', svm_model), ('rf', rf_model)],
-        voting='soft'
-    )
+    # Dimensionality Reduction for Visualization
+    print("\nPerforming PCA and t-SNE for visualization...")
+    dense_tfidf = tfidf.todense()
+    dense_tfidf = np.asarray(dense_tfidf)
     
-    models = {
-        'Naive Bayes': nb_model,
-        'SVM': svm_model,
-        'Random Forest': rf_model,
-        'Ensemble Voting': ensemble_model
-    }
+    pca = PCA(n_components=2, random_state=42)
+    pca_result = pca.fit_transform(dense_tfidf)
     
-    results = {}
+    tsne = TSNE(n_components=2, random_state=42)
+    tsne_result = tsne.fit_transform(dense_tfidf)
     
-    for name, model in models.items():
-        print(f"Training {name}...")
-        model.fit(X_train_tfidf, y_train)
-        y_pred = model.predict(X_test_tfidf)
-        acc = accuracy_score(y_test, y_pred)
-        results[name] = acc
-        print(f"{name} Accuracy: {acc:.4f}")
-        # print(classification_report(y_test, y_pred))
-        
-    plt.figure(figsize=(8, 5))
-    plt.bar(results.keys(), results.values(), color=['blue', 'green', 'orange', 'red'])
-    plt.title('Spam Detection Model Comparison')
-    plt.ylabel('Accuracy')
-    plt.ylim(0, 1.1)
-    for i, v in enumerate(results.values()):
-        plt.text(i, v + 0.02, f"{v:.2f}", ha='center', fontweight='bold')
-    plt.savefig('practical_8_spam_comparison.png')
-    print("\nSaved accuracy comparison chart to 'practical_8_spam_comparison.png'")
+    plt.figure(figsize=(12, 5))
+    
+    plt.subplot(1, 2, 1)
+    scatter = plt.scatter(pca_result[:, 0], pca_result[:, 1], c=clusters, cmap='viridis', alpha=0.5)
+    plt.title('PCA Document Clustering')
+    plt.colorbar(scatter)
+    
+    plt.subplot(1, 2, 2)
+    scatter2 = plt.scatter(tsne_result[:, 0], tsne_result[:, 1], c=clusters, cmap='viridis', alpha=0.5)
+    plt.title('t-SNE Document Clustering')
+    plt.colorbar(scatter2)
+    
+    plt.tight_layout()
+    plt.savefig('practical_9_clustering.png')
+    print("Saved clustering visualizations to 'practical_9_clustering.png'")
 
 if __name__ == "__main__":
     main()
